@@ -1,0 +1,842 @@
+
+# coding: utf-8
+
+# In[1]:
+
+
+#installing dependencies
+
+from lifetimes.plotting import *
+from lifetimes.utils import *
+from lifetimes.estimation import *
+from pandas import read_csv
+import pandas as pd
+from scipy.stats import beta, gamma, invgamma, norm
+import matplotlib.pyplot as plt
+import seaborn as sns
+import datetime as dt
+import warnings
+from random import uniform 
+from statsmodels.api import OLS
+import numpy as np
+warnings.filterwarnings('ignore')
+sns.set_palette("husl")
+sns.set(rc={'image.cmap': 'coolwarm'})
+
+
+# In[2]:
+
+
+get_ipython().magic('matplotlib inline')
+
+
+# In[3]:
+
+
+#loading the dataset
+
+df=pd.read_table('SalesData_4th Oct Final.txt')
+
+
+# In[4]:
+
+
+#looking at the data
+
+df.head()
+
+
+# In[118]:
+
+
+# Models in the lifetimes package use customers repeating purchasing behaviours
+#based on recency xt, frequency x and analysis period T. We use the three parameters (x,tx,T)
+
+
+# In[119]:
+
+
+# We need to transform our data into a usable RFM dataframe for the model using the function summary_data_from_transaction_data()
+
+
+# In[120]:
+
+
+#recency: most recent transaction within T less time of the first transation
+#frequency: no of repeated transactions customer has made
+#analysis period: end observation period less first purchase made by customer
+#units of time are in days
+
+
+# In[5]:
+
+
+# looking at the transactions of our customers
+
+df['Date'] = pd.to_datetime(df['Date'])
+
+print 'Number of Entries: %s' % len(df)
+
+
+# In[6]:
+
+
+#taking transactions which are positive
+
+df=df[df['Total']>0]
+
+
+# In[7]:
+
+
+#lost a few rows in our data
+df.shape
+
+
+# In[8]:
+
+
+#checking nulls
+df.isnull().sum()
+
+
+# In[9]:
+
+
+#check for nans
+df.isnull().sum().sum()
+
+
+# In[10]:
+
+
+#check for ClientID column
+df['ClientID'].isnull().sum()
+
+
+# In[11]:
+
+
+#take only finite rows for the column
+
+df = df[np.isfinite(df['ClientID'])]
+
+
+# In[12]:
+
+
+#check for nans
+df.isnull().sum().sum()
+
+
+# In[13]:
+
+
+#check for ClientID column
+df['ClientID'].isnull().sum()
+
+
+# In[14]:
+
+
+#convert clientid to int
+
+df['ClientID']=df['ClientID'].astype(int)
+
+
+# In[15]:
+
+
+df.head()
+
+
+# In[16]:
+
+
+#transforming our data to fit the model using the function
+data = summary_data_from_transaction_data(df, 'ClientID', 'Date', monetary_value_col='Total', observation_period_end='2017-09-10')
+data.head()
+
+
+# In[17]:
+
+
+#filter monetray_value only greater than zero
+
+data=data[data['monetary_value']>0]
+
+
+# In[18]:
+
+
+#describe
+data.describe()
+
+
+# In[19]:
+
+
+#details about customer frequencies: plot
+
+data[data['frequency'] > 0]['frequency'].plot(kind='hist', bins=20)
+
+
+# In[20]:
+
+
+#stats 
+print data[data['frequency'] > 0]['frequency'].describe()
+
+#on average customers at RompNroll visit 4 times
+
+
+# In[21]:
+
+
+#details about customer recent: plot
+
+data[data['recency'] > 0]['recency'].plot(kind='hist', bins=20)
+
+
+# In[22]:
+
+
+#stats 
+print data[data['recency'] > 0]['recency'].describe()
+
+
+# In[23]:
+
+
+#considering that we are looking at 3 yeartime period 
+# we can observe that having 50% of romp n roll customers churn before 4 months (104) 
+#is even up and 75% of your customers churn before 9 months (276)
+
+
+# In[24]:
+
+
+#more plots on recency
+data[data['recency'] != 0]['recency'].plot(kind='hist', bins=20)
+
+
+# In[25]:
+
+
+#Fitting the Model BG/NBD Model
+#assumptions:
+# 1. each customer make repeat purchases at different levels
+# 2. interval between the purchases are modeled by an exponential dist with a transaction rate lambda
+# 3.after each transaction the customer has a unknown character p (probability of going inactive) modeled by a shifted geometric dist
+# 4.two parameters for heterogeneity based on a Gamma distribution for lambda and p
+# 5. we have 4 parameters they are r,a,alpha (gamma distro), b(beta distro)
+
+
+# In[26]:
+
+
+#using the package lifelines
+bgf = BetaGeoFitter(penalizer_coef=0.0)
+bgf.fit(data['frequency'], data['recency'], data['T'], )
+print bgf
+
+
+# In[27]:
+
+
+# the parameters are a: 1.81 alpha: 84.90 b:4.71 r:2.42
+
+
+# In[42]:
+
+
+#looking at the heterogenity plots
+gbd = beta.rvs(bgf.params_['a'], bgf.params_['b'], size = 50000)
+ggd = gamma.rvs(bgf.params_['r'], scale=1./bgf.params_['alpha'], size = 50000)
+plt.figure(figsize=(14,4))
+plt.subplot(121)
+plt.title('Heterogenity of $p$')
+temp = plt.hist(gbd, 1000, facecolor='pink', alpha=0.75)
+plt.subplot(122)
+plt.title('Heterogenity of $\lambda$')
+temp = plt.hist(ggd, 1000, facecolor='pink', alpha=0.75)
+plt.xlim(0.0,0.02)
+
+
+# In[35]:
+
+
+np.median(gbd)
+
+
+# In[36]:
+
+
+np.mean(gbd)
+
+
+# In[37]:
+
+
+np.mean(ggd)
+
+
+# In[38]:
+
+
+np.median(ggd)
+
+
+# In[145]:
+
+
+#commenting on the plots of heterogenity 
+#the two most important paramaters are 
+#1. probability of customer dropping out has a range centered between 15 to 40%
+# 2. the customer transaction rateranges between 0.01 to 0.02
+
+
+# In[146]:
+
+
+#plots according to Peter fader that are most important to understand the accuracy of the model
+#these plots will help us understand the customer behaviour story to see if our model is a good fit for the customers
+
+
+# In[49]:
+
+
+#Actual repeat purchase of the customers Vs the Model repeat purchase prediction 
+plot_period_transactions(bgf, max_frequency=15)
+
+
+# In[148]:
+
+
+#the model does a good job in predicting the customer purchases over estimating three, four and five repeat purchases 
+#it underestimates one and two repeat purchases
+
+
+# In[47]:
+
+
+#validation of the model to check for overfitting 
+
+#separate the dataset into two sets training and test 
+
+#train (jan 2015 to 2016 dec) test (jan 2017 to current)
+
+# we can fit our model with train set and understand how well it forecasts our customers out of sample purchasing
+
+summary_cal_holdout = calibration_and_holdout_data(df, 'ClientID', 'Date', 
+                                        calibration_period_end='2016-12-31',
+                                        observation_period_end='2017-09-10' )   
+bgf.fit(summary_cal_holdout['frequency_cal'], summary_cal_holdout['recency_cal'], summary_cal_holdout['T_cal'])
+plot_calibration_purchases_vs_holdout_purchases(bgf, summary_cal_holdout, n=30)
+
+
+# In[51]:
+
+
+# The above plot shows our fitted model prediction green vs our out of sample repeat purchase frequencny blue
+# x axis: customer grouped based on x repeat purchases 
+#Y axis: meanof groups subsequent purchase
+
+
+# In[52]:
+
+
+#for example for customers in our training period that have had 4 purchases the same group 
+#had on average about 1.1 purchases subsequently the model predicted the same 
+#still the model needs to be worked upon
+
+
+# In[53]:
+
+
+#R/F Matrix Plots
+
+
+# In[54]:
+
+
+# for a given random customer  with his charactersitics (x,tx) we can predict teh expected number of purchases 
+# within a time period which can be set, lets take it a year (T=365) 
+
+
+# In[55]:
+
+
+plot_frequency_recency_matrix(bgf, T=365)
+
+
+# In[56]:
+
+
+#customers that purchase frequently and recently have a much higher expected future repeat purchase although this is very slim region on the chart. 
+
+
+# In[57]:
+
+
+#calculate for a given random customer(x,tx) the probability as of today that they are still alive
+
+
+# In[58]:
+
+
+plot_probability_alive_matrix(bgf)
+
+
+# In[59]:
+
+
+#According to the model, it's very likely as long as they bought recently. 
+#Even if they only bought once, they have about a 70-80% chance that they will buy again in the future.
+#Customers that are considered dead are usually ones that haven't made an order in a while.
+
+
+# In[60]:
+
+
+#It is interesting to note that for a given recency, 
+#customer's with more frequency are more likely to be considered dead
+
+
+# In[61]:
+
+
+#This is a property of the model that illustrates a clear behavioral story: 
+#If we observe customers making more frequent purchases, then having a prolonged period of 
+#inactivity
+#makes it very likely that they've died off
+
+
+# In[62]:
+
+
+#Analyzing Customer's Historical Path 
+
+
+# In[63]:
+
+
+#a granular customer-base level. picture
+# observe each of our customer's historical purchasing path
+#and measure our confidence that they have not dropped out in between purchases
+
+
+# In[64]:
+
+
+# To get a small and relevant subsample, I will let the bgf model create projections
+#for the next month purchasing pattern of my entire current customer-base and pick out 3 
+#of my best customers. As shown, our best customers that are projected to
+#make more future repeat purchases are often our newest ones. 
+#This makes sense since the model has revealed to us before that our customer 
+#base has a tendency to drop off after a short period of time.
+
+
+# In[103]:
+
+
+t = 31
+data['predicted_purchases'] = bgf.conditional_expected_number_of_purchases_up_to_time(t, data['frequency'], data['recency'], data['T'])
+best_projected_cust = data.sort_values('predicted_purchases').tail(5)
+print data.sort_values('predicted_purchases').tail(5)
+
+
+# In[66]:
+
+
+# Adding a one month cushion, we can infer the probability that these customers are alive or dead
+#if we have not seen them purchase by the end of the month.
+
+
+# In[67]:
+
+
+# For example, for customer 11174 with a short life-time but very recent purchases
+# we expect him/her to return and buy at-leasts once (1.33)during the month of october.
+#If however, we don't see this person
+#make an order by the middle of october 2017, there is a good chance that they're dead.
+
+
+# #fig = plt.figure(figsize=(12,12))
+# for ind,i in enumerate(best_projected_cust.index.tolist()):
+#     ax = plt.subplot(4,2,ind+1)
+#     best_T = data.ix[i]['T']+31 #add a month
+#     best_trans = df[df['ClientID'] == i]
+#     plot_history_alive(bgf, best_T, best_trans, 'Date', freq='D', ax=ax)
+#     ax.set_title('ID: '+str(i))
+#     plt.xticks(rotation=25)
+# fig.tight_layout()# error in code
+
+# In[68]:
+
+
+#Customer Equity:  Value in Dollars: The Gamma-Gamma Model
+
+
+# In[69]:
+
+
+#In a traditional RFM matrix, each customer can be assigned a monetary value with his or her customer profile. 
+#This value is usually calculated as the mean transaction value of his or her purchasing history
+
+
+# In[70]:
+
+
+#an average profit margin of 30%, multiply that by the revenue.
+#Note that we are only interested in customers that have repeat purchases.
+
+
+# In[84]:
+
+
+ggf = GammaGammaFitter(penalizer_coef = 0)
+ret_cust_data = data[data['frequency'] > 0]
+ret_cust_data['monetary_value'] = ret_cust_data['monetary_value']*0.30 # Set Monetary value to gross profit only
+ggf.fit(ret_cust_data['frequency'], ret_cust_data['monetary_value'])
+p,q,v = ggf._unload_params('p', 'q', 'v')
+print ggf
+
+
+# In[85]:
+
+
+# the maximum likellihood estimates of the model parameters are p=0.72 q=4.70 v=108.73
+
+
+# In[86]:
+
+
+from scipy.special import beta
+def pzbar(zbar,p,q,v,x):
+    return (1./(zbar*beta(p*x,q)))*((v/(v+x*zbar))**(q))*(((x*zbar)/(v+x*zbar))**(p*x))
+
+x = range(1,100)
+numtrans = [1,3,5,25,100]
+dist = pd.DataFrame(0,index=x, columns=numtrans)
+for j in range(0,5):
+    for i in x:
+        dist.loc[i,numtrans[j]] = pzbar(i, p,q,v,numtrans[j])
+dist.plot(figsize=(10,4))
+
+
+# In[87]:
+
+
+#mean transaction value on x axis across the y f(zeta) 
+#estimated distribution f averag spend per transaction
+
+
+# In[88]:
+
+
+#give the frequency x and monetray value (z) for the data of each individual the
+#log likelihood function hasa form
+# we can use the Gamma distribution to approximate the distribution of the
+#mean transaction value ($\bar{z}=\sum_{i} z_i / x$) for EACH customer: 
+
+
+# In[89]:
+
+
+#We can calculate the conditional average profit of our customer base 
+#versus the observed average profit. In short, the conditional average profit
+#uses the same concept of unobserved average transaction value in the distribution
+#and provide a shrinkage mean between the unobserved mean and the customer's sample mean.
+
+
+# In[90]:
+
+
+#The shrinkage model also allows us to closely examine the distribution on a customer by customer basis. Recall that we previously discovered our six best customers for the month of January, let's look at their transaction value we expect from them over the next month.
+
+
+# In[104]:
+
+
+customer_scale = p*(v+ret_cust_data['frequency']*ret_cust_data['monetary_value'])
+customer_shape = p*ret_cust_data['frequency']+q
+ez = customer_scale/(customer_shape-1)
+best_projected_cust['predicted_purchase_value'] = best_projected_cust['predicted_purchases']*ez
+
+
+# In[105]:
+
+
+best_projected_cust.head(5)
+
+
+# In[195]:
+
+
+# After factoring in their underlying mean purchase distribution,insights:
+
+# The order of ranking changes, customer 
+#11864  is now our second best customer based on his transaction value.
+#10970 and 1955 are frequent small buyers, they make frequent purchases worth approximately $6.87 to $7.11. Thus, we are more confident about their range of mean transaction prices.
+#Conversely, 729 being our best customer, purchase infrequently but in large quantities, we are less sure of his mean transaction value but he still stochastically dominates other top customers.
+
+
+# In[194]:
+
+
+plt.figure(figsize=(20,8))
+plt.xlabel('$ Profit')
+for ind,i in enumerate(best_projected_cust.index.tolist()):
+    ccig = invgamma.rvs(customer_shape[i], scale=customer_scale[i], size = 100000)
+    plt.text(ez[i]+5, invgamma.pdf(ez[i], customer_shape[i], scale=customer_scale[i]),
+             '$'+str(round(best_projected_cust['predicted_purchase_value'][i],2))
+            +'| '+str(int(ret_cust_data.loc[i,'frequency'])))
+    sns.distplot(ccig, hist=False, rug=False, label=str(i));
+
+
+# In[196]:
+
+
+#Valuation: Estimating From the Ground Up
+# how much the company should cost at the present day. 
+#the cost (also referred to as worth or value) of a company should be equivalent to its discounted future cash flow net of all costs and investments
+
+
+# In[197]:
+
+
+# The company incurs a profit margin on each purchase lets say 30%
+# and pays a fixed cost each month. 
+#Taking this, we can make a few assumptions on their operations.
+
+
+# In[198]:
+
+
+#look at annual cost data , divide into equal monthky payments
+#use this as an estimate for the cost
+
+monthly_fc = 1950000/12 # Estimated from 2017 annual data
+print 'Estimated Fixed Cost per month: $%s' % monthly_fc
+
+
+# In[199]:
+
+
+#. Average annual equity return ranges 6-8%, if Romp N roll were to sell off their operations
+#today to investors,we can assume a 10% annualized return for the new owners
+#due to its small size.
+
+
+# In[200]:
+
+
+dr = 0.10 # An annualized discrete rate
+mr = (1+dr)**(1/12.)-1. # Monthly effective rate
+print 'Effective Monthly Rate: %s%%' % mr
+
+
+# In[201]:
+
+
+#New customer sales have risen historically but stagnated over 
+#time with cyclical purchase trends.
+
+
+# In[204]:
+
+
+unique_cohort = df[['ClientID', 'Date']].sort_values('Date')
+unique_cohort = unique_cohort.drop_duplicates('ClientID')
+unique_cohort['Date_M'] = unique_cohort['Date'].apply(lambda x: dt.datetime(day=1,month=x.month,year=x.year))
+cohort_over_time = unique_cohort[['Date_M', 'ClientID']].groupby('Date_M').count()
+
+
+# In[207]:
+
+
+cohort_over_time.head(40)
+
+
+# In[208]:
+
+
+ax = cohort_over_time.plot(legend=False, figsize=(12,4))
+ax.set_xlabel('Date'); ax.set_ylabel('New Customer Cohort Size')
+
+
+# In[209]:
+
+
+#Observed customers have their own individual purchasing patterns
+#while the newly arrived customers will assume model population parameters.
+
+
+# In[210]:
+
+
+# the value of Romp N roll is simply the summation of:
+
+ #1 The present value of all new and repeat sales from each month's new cohort of
+    #unobserved customers.
+ #2 The present value of all gross profit on repeat sales from our observed customers.
+ #3 Less the present value of fixed cost for each month.
+
+#Repeat until infinity.
+
+
+# In[211]:
+
+
+#We first address (1) by forecasting out our seasonal cohort of new customers.
+#We fit the time-series model to only the stagnation period (2010 and beyond).
+#Where $\delta_{m(t)}$ is equal to the indicator variable denoting which month $t$ is in. 
+#C is equal to the mean monthly estimated new arrivals. 
+#Example plot of the arrivals forecast is below but remember that this 
+#forecast extends indefinitely as we also believe Romp N roll can operate to an indefinite horizon.
+
+
+# In[234]:
+
+
+def prepareDesignMatrix(x):
+    x['M'] = x.index.month
+    for elem in x['M'].unique():
+        x['M'+str(elem)] = (x['M'] == elem).astype(int)
+    x['c'] = 1.
+    return x.drop('M', axis=1)
+cohort_over_time = cohort_over_time[cohort_over_time.index >= dt.datetime(2010,2,1)]
+cohort_over_time = prepareDesignMatrix(cohort_over_time)
+res = OLS(cohort_over_time['ClientID'], cohort_over_time[['M1','M2','M3','M4','M5','M6','M7','M8','M9','M10','M11','M12','c']]).fit()
+print res.summary()
+
+
+# In[235]:
+
+
+cohort_over_time['predicted'] = res.predict()
+f_cohort = pd.DataFrame(None, index= pd.date_range(cohort_over_time.index.max(), periods=5*12, freq='M'))
+f_cohort = prepareDesignMatrix(f_cohort)
+f_cohort['forecast'] = res.predict(f_cohort)
+cohort_over_time['predicted'].plot(style='--')
+cohort_over_time['ClientID'].plot(legend=None)
+ax = f_cohort['forecast'].plot(style='--', figsize=(12,4))
+ax.set_xlabel('Date'); ax.set_ylabel('New Customer Cohort Size')
+
+
+# In[218]:
+
+
+#The present value calculation is a bit tricky for both (1) and (2) which we will refer 
+#to as Discounted Repeat Value (DRV) and Residual Customer Value (RCV) respectively.
+#For both these measures, customers will repeatedly buy over multiple periods, 
+#these periods are then each discounted back to their present value
+
+
+# In[219]:
+
+
+#The RCV consists of first predicting the expected purchases of each observed customer given their $(x, t_x, T)$
+
+
+# In[220]:
+
+
+#We can then infer their expected $Z$ from the GG model as shown before to obtain an expected gross profit 
+#from them at each month
+#. Note that our periodicity is monthly while the model calculates in days. 
+
+
+# In[236]:
+
+
+def RCV(t, model_trans, d, rfm, zeta):
+    discount_factor = 1./(1+d)**t
+    dif = (model_trans.conditional_expected_number_of_purchases_up_to_time(t*30, rfm['frequency'], rfm['recency'], rfm['T'])
+        - model_trans.conditional_expected_number_of_purchases_up_to_time((t-1)*30, rfm['frequency'], rfm['recency'], rfm['T']))
+    return ((dif*zeta).sum())*discount_factor
+
+
+# In[237]:
+
+
+#The DRV (of only ONE customer) is similar in that we discount the expected gross profit of 
+#a generic customer from our two models.
+
+
+# In[238]:
+
+
+#we have to consider the fact that when one cohort of customers arrive, they must first make
+#a purchase before beginning they buy until they die. For example, if one customer enters at $t=0$ we would assume they would have first made a purchase at that time period and 
+#then repeat purchases at $t=1,2,3,...,\infty$.
+
+
+# In[239]:
+
+
+def DRV(t, model, d, zeta):
+    discount_factor = 1./(1+d)**t
+    dif = model.expected_number_of_purchases_up_to_time(t*30) - model.expected_number_of_purchases_up_to_time((t-1)*30)
+    return zeta*(dif*discount_factor+(t==1))
+
+
+# In[240]:
+
+
+#Lastly, the DRV is only designed for one customer that arrives at some arbitrary time and
+#buys until infinity. At each time period $\tau$, a cohort of size $A_t$ arrives and 
+#has a present value of $A_t(DRV)$. If we allow $\tau\rightarrow\infty$ and 
+#take the summation of each present value of cohort DRV,
+#we end up with the terminal value of the firm. 
+
+
+# In[1]:
+
+
+def TermVal(t, model, d, zeta, ts_model, drv):
+    q = dt.datetime(2016,1,1)+pd.DateOffset(months=t)
+    x = pd.DataFrame([[0,0,0,0,0,0,0,0,0,0,0,0]], index=[q], columns=['M1','M2','M3','M4','M5','M6','M7','M8','M9','M10','M11','M12'])
+    cohort_size = ts_model.predict(prepareDesignMatrix(x))[0]
+    val = drv * cohort_size/( (1+d)**t )
+    #print 'present value of cohort size %s at t = %s : %s' % (cohort_size, t,val)
+    return val
+
+def approximate(fn, t=1, eps_tol=1e-6, eps=0, **kwargs):
+    eps = 0
+    cf = 0
+    while True:
+        cf += fn(t=t, **kwargs)
+        if(cf - eps < eps_tol):
+            break
+        eps = cf; t+=1
+    return cf
+
+
+# terminal_value = (approximate(TermVal, model=bgf, 
+#                               d=mr, zeta=(p*v)/(q-1), 
+#                               ts_model=res, 
+#                               drv=approximate(DRV, model=bgf, d=mr, zeta=(p*v)/(q-1)),
+#                               eps_tol=1e-8))
+# print 'Discount Repeated Value: $%.2f' % terminal_value
+
+# In[229]:
+
+
+residual_value = approximate(RCV, model_trans=bgf, d=mr, rfm=ret_cust_data, zeta=ez)
+print 'Residual Customer Value: $%.2f' % residual_value
+
+
+# In[ ]:
+
+
+#Let's calculate our firm value
+
+
+# In[230]:
+
+
+pv_cost = monthly_fc / mr
+print 'Present Value of Fixed Cost: $%.2f' % pv_cost
+
